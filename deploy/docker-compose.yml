@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: atheer_db
+    environment:
+      POSTGRES_DB: atheer_db
+      POSTGRES_USER: atheer_user
+      POSTGRES_PASSWORD: atheer_password_secure
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atheer_user -d atheer_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: atheer_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: atheer_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+
+volumes:
+  postgres_data:
+  qdrant_data:
+
+
+# 5. خادم MLflow (لتتبع تجارب الذكاء الاصطناعي وإدارة إصدارات النماذج)
+  mlflow:
+    image: bitnami/mlflow:latest
+    container_name: atheer_mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://0.0.0.0:5000
+    volumes:
+      - mlflow_data:/bitnami/mlflow
+
+# لا تنسَ إضافة القرص الصلب الخاص به في قسم volumes بالأسفل
+volumes:
+  postgres_data:
+  qdrant_data:
+  mlflow_data:
+

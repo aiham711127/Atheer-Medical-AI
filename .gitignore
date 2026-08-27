@@ -1,0 +1,38 @@
+# =========================
+# Python & Environment
+# =========================
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+.env
+
+# =========================
+# Flutter & Frontend
+# =========================
+frontend/.packages
+frontend/.pub/
+frontend/build/
+frontend/.dart_tool/
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+*.log
+
+# =========================
+# AI & Data (Very Important to ignore heavy files)
+# =========================
+ai_engine/models/*.onnx
+ai_engine/data/raw/*.csv
+ai_engine/data/processed/*
+
+# =========================
+# OS & IDE (Mac, Windows, VSCode, PyCharm)
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
