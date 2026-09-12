@@ -1,0 +1,26 @@
+name: Atheer Backend CI
+
+# متى يعمل هذا الفحص؟ عند أي عملية رفع (Push) أو طلب دمج (Pull Request) للفرع الرئيسي
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-and-verify:
+    name: Build Docker Container
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. سحب الكود المصدري من المستودع
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    # 2. فحص بناء حاوية دوكر (للتأكد من عدم وجود تعارض في المكتبات)
+    - name: Test Docker Build
+      run: |
+        echo "Building Atheer Backend Image..."
+        docker build -t atheer-backend:test ./backend
+
+    # 3. (اختياري مستقبلاً) يمكننا هنا إضافة أوامر لتشغيل الاختبارات البرمجية (Pytest)
