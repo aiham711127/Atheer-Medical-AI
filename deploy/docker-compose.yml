@@ -1,6 +1,32 @@
-version: '3.8'
+# deploy/docker-compose.yml
+name: atheer-med-platform
 
 services:
+  backend:
+    build: 
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: atheer_backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../backend/.env
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - DATABASE_URL=postgresql+asyncpg://atheer_user:atheer_password_secure@db:5432/atheer_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - ../backend:/app
+    restart: unless-stopped
+
   db:
     image: pgvector/pgvector:pg16
     container_name: atheer_db
@@ -14,9 +40,10 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atheer_user -d atheer_db"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7.2-alpine
@@ -25,9 +52,10 @@ services:
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -37,28 +65,8 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   qdrant_data:
-
-
-# 5. خادم MLflow (لتتبع تجارب الذكاء الاصطناعي وإدارة إصدارات النماذج)
-  mlflow:
-    image: bitnami/mlflow:latest
-    container_name: atheer_mlflow
-    ports:
-      - "5000:5000"
-    environment:
-      - MLFLOW_TRACKING_URI=http://0.0.0.0:5000
-    volumes:
-      - mlflow_data:/bitnami/mlflow
-
-# لا تنسَ إضافة القرص الصلب الخاص به في قسم volumes بالأسفل
-volumes:
-  postgres_data:
-  qdrant_data:
-  mlflow_data:
-

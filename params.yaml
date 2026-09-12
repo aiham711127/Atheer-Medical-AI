@@ -1,0 +1,14 @@
+# params.yaml
+llm:
+  model_name: "gemini-3.6-flash"
+  temperature: 0.0
+  max_output_tokens: 1024
+
+retrieval:
+  top_k: 5
+  score_threshold: 0.01
+
+ingestion:
+  chunk_size: 500
+  chunk_overlap: 50
+  batch_size: 10

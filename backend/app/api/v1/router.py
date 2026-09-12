@@ -1,12 +1,14 @@
 # backend/app/api/v1/router.py
-# backend/app/api/v1/router.py
 from fastapi import APIRouter
-from app.api.v1.endpoints import rag_query, upload  # إضافة مسار الرفع الجديد هنا
+from app.api.v1.endpoints import rag_query, auth, upload # أضفنا auth هنا
 
 api_router = APIRouter()
 
-# ربط ملف الدردشة بالمسار الرئيسي
-api_router.include_router(rag_query.router, tags=["chat"])
+# تسجيل مسارات المصادقة (التسجيل والدخول)
+api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 
-# ربط ملف الرفع بالمسار الرئيسي
-api_router.include_router(upload.router, tags=["upload"])
+# تسجيل مسار الدردشة
+api_router.include_router(rag_query.router, tags=["Chat"])
+
+# تسجيل مسار الرفع (إذا كان موجوداً لديك)
+api_router.include_router(upload.router, tags=["Upload"])

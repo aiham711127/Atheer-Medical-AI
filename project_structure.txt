@@ -1,0 +1,104 @@
+📁 هيكل المشروع: atheer_platform
+📍 المسار: C:\Users\DELL\Desktop\project_AI\atheer_platform
+======================================================================
+
+📂 atheer_platform/
+    📄 README.md
+    📄 extract_structure.py
+    📄 params.yaml
+    📄 project_struct.txt
+    📄 schema.yaml
+    📄 structure_clean.txt
+    📂 backend/
+        📄 Dockerfile
+        📄 alembic.ini
+        📄 batch_ingest.py
+        📄 check_models.py
+        📄 download_papers.py
+        📄 requirements.txt
+        📄 reset.py
+        📄 reset_qdrant.py
+        📄 test_db.py
+        📂 ai_engine/
+            📂 data/
+                📂 raw/
+                    (فارغ)
+        📂 alembic/
+            📄 env.py
+            📂 versions/
+                📄 d7f40eb91214_initial_schema.py
+        📂 app/
+            📄 __init__.py
+            📄 main.py
+            📂 api/
+                📄 __init__.py
+                📄 deps.py
+                📂 v1/
+                    📄 __init__.py
+                    📄 router.py
+                    📂 endpoints/
+                        📄 __init__.py
+                        📄 auth.py
+                        📄 rag_query.py
+                        📄 upload.py
+            📂 core/
+                📄 __init__.py
+                📄 arabic_utils.py
+                📄 config.py
+                📄 database.py
+                📄 mlops_tracker.py
+                📄 security.py
+            📂 models/
+                📄 __init__.py
+                📂 domain/
+                    📄 __init__.py
+                    📄 article.py
+                    📄 search_history.PY
+                    📄 user.py
+                📂 schemas/
+                    📄 __init__.py
+                    📄 article.py
+                    📄 query.py
+                    📄 rag_response.py
+                    📄 user.py
+            📂 services/
+                📄 __init__.py
+                📂 rag/
+                    📄 embeddings.py
+                    📄 hybrid_retriever.py
+                    📄 ingestion_engine.py
+                    📄 llm_engine.py
+                    📄 orchestrator.py
+                    📄 prompt_templates.py
+                    📄 vector_store.py
+        📂 qdrant_local_data/
+            📄 meta.json
+            📂 collection/
+                📂 medical_articles/
+                    (فارغ)
+        📂 scripts/
+            📄 check_db.py
+            📄 check_groq.py
+            📄 check_models.py
+            📄 drop_db.py
+            📄 ingest_cardiology.py
+            📄 ingest_pubmed.py
+            📄 test_stream.py
+        📂 tests/
+            (فارغ)
+    📂 config/
+        📄 config.yaml
+    📂 deploy/
+        📄 docker-compose.yml
+    📂 frontend/
+        📄 README.md
+        📄 analysis_options.yaml
+        📄 pubspec.yaml
+        📂 lib/
+        📂 lib/
+            📂 models/
+                chat_message.dart
+            📂 services/
+                api_service.dart
+            📂 views/
+                main.dart

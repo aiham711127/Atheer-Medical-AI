@@ -1,0 +1,28 @@
+
+# config/schema.yaml
+document_structure:
+  core_fields:
+    - id             # معرف فريد للقطعة (UUID)
+    - content        # النص الطبي نفسه
+  metadata_fields:
+    specialty:       # التخصص الطبي (مثل: Cardiology, Neurology)
+      type: string
+      required: true
+    source_type:     # نوع المصدر (Clinical_Guideline, RCT_Research, Flashcard)
+      type: string
+      required: true
+    source_name:     # اسم المرجع الدقيق
+      type: string
+      required: true
+    evidence_level:  # مستوى الدليل الطبي (A: دليل قوي، B: دليل متوسط، C: رأي خبراء)
+      type: string
+      required: true
+    access_level:    # صلاحية الوصول (Doctor_Only, Patient_Safe)
+      type: string
+      required: true
+    chunk_index:     # ترتيب القطعة لمعرفة السياق
+      type: integer
+      required: true
+    last_updated:    # تاريخ نشر المعلومة لاستبعاد البروتوكولات القديمة
+      type: date
+      required: true

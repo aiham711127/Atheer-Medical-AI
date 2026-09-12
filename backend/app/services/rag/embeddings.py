@@ -1,42 +1,46 @@
 # backend/app/services/rag/embeddings.py
-import requests
-import time
+import asyncio
+import logging
+from sentence_transformers import SentenceTransformer
 from app.core.config import settings
 
-class EmbeddingService:
-    def __init__(self):
-        self.api_key = settings.GOOGLE_API_KEY
-        if not self.api_key:
-            raise ValueError("GOOGLE_API_KEY is missing! تأكد من ملف .env")
+logger = logging.getLogger(__name__)
 
-    def encode(self, text: str) -> dict:
-        # استخدام النموذج الأساسي والمستقر دائماً من جوجل
-        model_name = "gemini-embedding-001"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:embedContent?key={self.api_key}"
+class EmbeddingService:
+    _instance = None
+    _model = None
+
+    def __new__(cls):
+        # Singleton Pattern: نضمن تحميل النموذج مرة واحدة فقط في الذاكرة
+        if cls._instance is None:
+            cls._instance = super(EmbeddingService, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        # تهيئة النموذج فقط إذا لم يكن قد تم تحميله مسبقاً
+        if self._model is None:
+            logger.info(f"Loading local embedding model: {settings.EMBEDDING_MODEL_NAME}...")
+            self._model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+            logger.info("Local Embedding Model loaded successfully.")
+
+    async def encode(self, text: str) -> dict:
+        """
+        توليد التضمين بشكل غير متزامن لتجنب تجميد خادم FastAPI
+        """
+        if not text or not text.strip():
+            raise ValueError("النص فارغ، لا يمكن توليد التضمين.")
+
+        # الحصول على الـ Event Loop الحالي الخاص بـ FastAPI
+        loop = asyncio.get_running_loop()
         
-        payload = {
-            "model": f"models/{model_name}",
-            "content": {
-                "parts": [{"text": text}]
-            }
-        }
+        # تغليف عملية الـ CPU الثقيلة للعمل في الخلفية (Background Thread)
+        def _encode_sync():
+            # normalize_embeddings=True يُحسن دقة حساب مسافة جيب التمام (Cosine Similarity)
+            vector = self._model.encode(text, normalize_embeddings=True).tolist()
+            return vector
         
-        # آلية إعادة المحاولة القوية
-        retries = 3
-        for attempt in range(retries):
-            try:
-                response = requests.post(url, json=payload, timeout=20)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    embedding_vector = data["embedding"]["values"]
-                    return {"dense": embedding_vector}
-                else:
-                    print(f"[-] محاولة {attempt+1} فشلت. الخطأ: {response.text}")
-                    
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                print(f"[!] انقطاع في الشبكة (المحاولة {attempt+1})...")
-            
-            time.sleep(2)
-            
-        raise Exception("فشل الاتصال بخوادم Google Embeddings بعد 3 محاولات.")
+        # تنفيذ التضمين دون حجب الخادم
+        vector_result = await loop.run_in_executor(None, _encode_sync)
+        
+        # الإرجاع بنفس الهيكلية التي يتوقعها محرك الـ RAG
+        return {"dense": vector_result}

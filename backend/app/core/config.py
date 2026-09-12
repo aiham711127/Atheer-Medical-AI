@@ -1,55 +1,56 @@
 # backend/app/core/config.py
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
-from pathlib import Path
 
-# تحديد المسار الجذر للمشروع (أعلى مجلد backend)
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+import os
+from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
 
+# إجبار النظام على قراءة ملف .env قبل أي شيء آخر
+load_dotenv()
+   
 class Settings(BaseSettings):
-    # Server
-    ENVIRONMENT: str = "development"
+    PROJECT_NAME: str = "Atheer Med API"
     DEBUG: bool = True
-    PROJECT_NAME: str = "Atheer Med"
-    API_V1_STR: str = "/api/v1"
-
-    # Security
-    SECRET_KEY: str = "change-me-in-production"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    ALGORITHM: str = "HS256"
-
-    # PostgreSQL (قاعدة البيانات التي أصلحناها سابقاً)
-    async_database_url: str = "postgresql+asyncpg://neondb_owner:npg_LSzQY86XGurh@ep-ancient-hill-aywswge8-pooler.c-5.us-east-2.aws.neon.tech/neondb"
-    # (ملاحظة: تأكد أن تضع رابط Neon الحقيقي الخاص بك في السطر الأعلى بدلاً من الـ XXXXXX)
-
-
-    # Redis
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-
-    # Qdrant (قاعدة بيانات المتجهات)
-    QDRANT_HOST: str = "localhost"
-    QDRANT_PORT: int = 6333
-    QDRANT_API_KEY: Optional[str] = None
-    QDRANT_COLLECTION_NAME: str = "medical_articles"
-
-    # --- إعدادات جوجل الجديدة (الخفيفة والسريعة) ---
-# --- إعدادات جوجل الجديدة (الخفيفة والسريعة) ---
-    GOOGLE_API_KEY: Optional[str] = None
-    EMBEDDING_PROVIDER: str = "google"
-    EMBEDDING_MODEL_NAME: str = "embedding-001"
-    #RETRIEVAL_MIN_SCORE: float = 0.6
-    RETRIEVAL_MIN_SCORE: float = 0.1 # للاختبار فقط
-    RETRIEVAL_TOP_K: int = 3
-    VECTOR_DIM: int = 3072  # <-- تم التعديل هنا ليتطابق مع مقاس جوجل
     
-    LLM_PROVIDER: str = "google"
-    GEMINI_MODEL_NAME: str = "gemini-1.5-flash"
+    # ----------------------------------------------------
+    # Security & Database
+    # ----------------------------------------------------
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "fallback_secret_key_for_dev")
+    ALGORITHM: str = "HS256"  # <--- هذا السطر كان مفقوداً
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # <--- وهذا السطر كان مفقوداً
+    async_database_url: str = os.getenv("DATABASE_URL", "")
 
-    model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"),
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    GOOGLE_API_KEY: str  = os.getenv("GOOGLE_API_KEY", "") # مفتاح قوقل 
+
+
+    # ----------------------------------------------------
+    # Vector Database (Qdrant Cloud)
+    # ----------------------------------------------------
+    QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
+    QDRANT_PORT: str = os.getenv("QDRANT_PORT", "6333")
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+    COLLECTION_NAME: str = os.getenv("QDRANT_COLLECTION_NAME", "medical_knowledge_base")
+    
+    # ----------------------------------------------------
+    # Unified Embedding Strategy (Pure Local)
+    # ----------------------------------------------------
+    # تم توحيد النموذج والأبعاد هنا لتكون المرجع الوحيد لجميع الملفات
+    EMBEDDING_MODEL_NAME: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    VECTOR_DIM: int = 384  # بُعد قاطع لا يتغير لحماية قاعدة البيانات
+    
+    # ----------------------------------------------------
+    # LLM & Retrieval Config
+# ----------------------------------------------------
+    # Third-Party APIs
+    # ----------------------------------------------------
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    # تم سحب القيمة الثابتة هنا مع تعيين النموذج الجديد كافتراضي
+    GEMINI_MODEL_NAME: str = os.getenv("GEMINI_MODEL_NAME", "")
+    RETRIEVAL_MIN_SCORE: float = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.15"))
+    RETRIEVAL_TOP_K: int = int(os.getenv("RETRIEVAL_TOP_K", "5"))
+
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
 
 settings = Settings()

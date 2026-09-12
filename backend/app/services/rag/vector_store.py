@@ -1,53 +1,59 @@
 # backend/app/services/rag/vector_store.py
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
-from app.core.config import settings, BASE_DIR
-import os
+import logging
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import VectorParams, Distance
+from app.core.config import settings
 
-class VectorStore:
+logger = logging.getLogger(__name__)
+
+class VectorStoreManager:
     def __init__(self):
-        db_path = os.path.join(BASE_DIR, "qdrant_local_data")
-        self.client = QdrantClient(path=str(db_path))
-        self.collection_name = settings.QDRANT_COLLECTION_NAME
-
-    def ensure_collection(self):
-        """تأكد من وجود الجدول، وإنشاؤه فقط إذا لم يكن موجوداً (لحماية البيانات من الحذف)"""
-        ACTUAL_DIMENSION = 3072
-        collections = self.client.get_collections().collections
-        collection_names = [c.name for c in collections]
+        # بناء الرابط السحابي الصحيح لـ Qdrant
+        qdrant_url = settings.QDRANT_HOST if settings.QDRANT_HOST.startswith("http") else f"https://{settings.QDRANT_HOST}"
+        if f":{settings.QDRANT_PORT}" not in qdrant_url:
+            qdrant_url = f"{qdrant_url}:{settings.QDRANT_PORT}"
         
-        # إذا لم يكن الجدول موجوداً، قم بإنشائه. (لن نقوم بحذفه أبداً بعد اليوم)
-        if self.collection_name not in collection_names:
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=VectorParams(
-                    size=ACTUAL_DIMENSION,
-                    distance=Distance.COSINE
-                )
-            )
-
-    def upsert(self, doc_id: str, dense_vector: list, payload: dict):
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=[PointStruct(id=doc_id, vector=dense_vector, payload=payload)]
+        self.client = AsyncQdrantClient(
+            url=qdrant_url,
+            api_key=settings.QDRANT_API_KEY,
+            timeout=60.0
         )
+        self.collection_name = settings.COLLECTION_NAME
+        self.vector_dim = settings.VECTOR_DIM  # سيسحب القيمة 384 من ملف الإعدادات
 
-    def search(self, dense_vector: list, limit: int = 10):
-        """البحث الذكي: يدعم إصدارات مكتبة Qdrant القديمة والحديثة"""
-        if hasattr(self.client, "search"):
-            # للإصدارات القديمة
-            return self.client.search(
-                collection_name=self.collection_name,
-                query_vector=dense_vector,
-                limit=limit,
-                with_payload=True
-            )
-        else:
-            # للإصدارات الحديثة جداً التي استبدلت search بـ query_points
-            response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=dense_vector,
-                limit=limit,
-                with_payload=True
-            )
-            return response.points
+    async def ensure_collection_exists(self):
+        """
+        يتحقق من وجود المجموعة، ويقوم بإنشائها إذا لم تكن موجودة.
+        الأهم: يتحقق من توافق الأبعاد (Dimension Mismatch Guardrail).
+        """
+        try:
+            exists = await self.client.collection_exists(self.collection_name)
+            
+            if not exists:
+                logger.info(f"Creating new collection '{self.collection_name}' with dimension {self.vector_dim}")
+                await self.client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(size=self.vector_dim, distance=Distance.COSINE)
+                )
+            else:
+                # نظام الحماية (Guardrail): استرداد إعدادات المجموعة الحالية
+                collection_info = await self.client.get_collection(self.collection_name)
+                
+                # التحقق من الأبعاد الفعلية في السحابة
+                actual_dim = collection_info.config.params.vectors.size
+                
+                if actual_dim != self.vector_dim:
+                    error_msg = (
+                        f"CRITICAL: Vector Dimension Mismatch! "
+                        f"Database has {actual_dim} dimensions, but the code expects {self.vector_dim}. "
+                        f"Please delete the existing collection in Qdrant and re-ingest the data."
+                    )
+                    logger.error(error_msg)
+                    # إيقاف التنفيذ فوراً لتجنب الأخطاء أثناء استعلامات المرضى
+                    raise ValueError(error_msg)
+                
+                logger.info(f"Collection '{self.collection_name}' verified successfully with {actual_dim} dimensions.")
+                
+        except Exception as e:
+            logger.error(f"Error checking/creating collection: {e}")
+            raise

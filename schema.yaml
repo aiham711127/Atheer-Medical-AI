@@ -1,0 +1,11 @@
+# schema.yaml
+medical_document:
+  required_columns:
+    - input
+    - output
+  data_types:
+    input: string
+    output: string
+  metadata_fields:
+    source: string
+    chunk_id: integer

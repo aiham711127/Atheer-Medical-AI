@@ -1,63 +1,48 @@
+# scripts/ingest_cardiology.py
 import os
+import sys
 import uuid
 import time
-from dotenv import load_dotenv
-from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance, PointStruct
+from tqdm import tqdm
 from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct
 
 # ==========================================
-# 1. Environment Config
+# 1. Architectural Alignment (توحيد المعمارية)
 # ==========================================
-load_dotenv()
+# إجبار السكربت على قراءة إعدادات الخادم المركزية لمنع الانفصال
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.core.config import settings
 
-raw_host = os.getenv("QDRANT_HOST", "").strip()
-QDRANT_PORT = os.getenv("QDRANT_PORT", "6333").strip()
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
+# بناء الرابط بنفس الطريقة التي يستخدمها الخادم تماماً
+qdrant_url = settings.QDRANT_HOST if settings.QDRANT_HOST.startswith("http") else f"https://{settings.QDRANT_HOST}"
+if f":{settings.QDRANT_PORT}" not in qdrant_url:
+    qdrant_url = f"{qdrant_url}:{settings.QDRANT_PORT}"
 
-COLLECTION_NAME = "medical_knowledge_base"
-VECTOR_DIM = 384  
-
-if not raw_host.startswith("http"):
-    raw_host = f"https://{raw_host}"
-
-if f":{QDRANT_PORT}" not in raw_host:
-    qdrant_url = f"{raw_host}:{QDRANT_PORT}"
-else:
-    qdrant_url = raw_host
+print(f"🔌 Connecting to Cloud: {qdrant_url}")
+print(f"📁 Target Collection: {settings.COLLECTION_NAME}")
 
 # ==========================================
 # 2. Resilient Database Connection
 # ==========================================
-print(f"🔌 Connecting to Cloud: {qdrant_url}")
-# Increased timeout to 300 seconds (5 minutes) for unstable networks
-qdrant_client = QdrantClient(url=qdrant_url, api_key=QDRANT_API_KEY, timeout=300.0)
+qdrant_client = QdrantClient(url=qdrant_url, api_key=settings.QDRANT_API_KEY, timeout=300.0)
 
-print("🧠 Loading Lightweight Local Model...")
-embedding_model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+print("🧠 Loading Project Embedding Model...")
+embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
 
 # ==========================================
-# 3. Recreate Database with Retry Logic
+# 3. Recreate Database
 # ==========================================
-print("🗑️ Resetting Database...")
-max_retries = 3
-for attempt in range(max_retries):
-    try:
-        if qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
-            qdrant_client.delete_collection(collection_name=COLLECTION_NAME)
+print(f"🗑️ Resetting Database '{settings.COLLECTION_NAME}'...")
+if qdrant_client.collection_exists(collection_name=settings.COLLECTION_NAME):
+    qdrant_client.delete_collection(collection_name=settings.COLLECTION_NAME)
 
-        qdrant_client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
-        )
-        break # Success, exit retry loop
-    except Exception as e:
-        print(f"⚠️ Network error during DB setup: {e}. Retrying {attempt+1}/{max_retries} in 5 seconds...")
-        time.sleep(5)
-        if attempt == max_retries - 1:
-            raise e # Fail if all retries exhausted
+qdrant_client.create_collection(
+    collection_name=settings.COLLECTION_NAME,
+    vectors_config=VectorParams(size=settings.VECTOR_DIM, distance=Distance.COSINE),
+)
 
 # ==========================================
 # 4. Fetch Dataset
@@ -70,7 +55,8 @@ filtered_data = []
 
 print("🔍 Filtering Data...")
 for row in dataset:
-    text_content = (row['input'] + " " + row['output']).lower()
+    # استخدام .get لتجنب أخطاء المفاتيح المفقودة
+    text_content = str(row.get('input', '') + " " + row.get('output', '')).lower()
     if any(k in text_content for k in keywords):
         filtered_data.append(row)
         if len(filtered_data) >= 500:
@@ -79,28 +65,26 @@ for row in dataset:
 print(f"✅ Found {len(filtered_data)} cases.")
 
 # ==========================================
-# 5. Fault-Tolerant Ingestion (Embedding & Upsert)
+# 5. Fault-Tolerant Ingestion
 # ==========================================
 print("⚙️ Embedding and Uploading...")
-# Extremely small batch size to prevent timeouts on slow connections
-batch_size = 5 
+batch_size = 10 
 points_to_upsert = []
 
 def safe_upsert(points):
-    """Upsert with a built-in retry mechanism"""
-    for attempt in range(max_retries):
+    for attempt in range(3):
         try:
-            qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
+            # إجبار السحابة على تأكيد الحفظ قبل الانتقال للدفعة التالية (wait=True)
+            qdrant_client.upsert(collection_name=settings.COLLECTION_NAME, points=points, wait=True)
             return
         except Exception as e:
-            print(f"\n⚠️ Upload timeout/error. Retrying in 5s... ({attempt+1}/{max_retries})")
+            print(f"\n⚠️ Upload error. Retrying in 5s... ({attempt+1}/3)")
             time.sleep(5)
-            if attempt == max_retries - 1:
+            if attempt == 2:
                 raise e
 
 for i, row in enumerate(tqdm(filtered_data, desc="Processing Data")):
-    combined_text = f"سؤال سريري: {row['input']}\nإجابة طبية: {row['output']}"
-    
+    combined_text = f"سؤال سريري: {row.get('input', '')}\nإجابة طبية: {row.get('output', '')}"
     vector = embedding_model.encode(combined_text, normalize_embeddings=True).tolist()
     
     payload = {
@@ -119,4 +103,10 @@ for i, row in enumerate(tqdm(filtered_data, desc="Processing Data")):
 if points_to_upsert:
     safe_upsert(points_to_upsert)
 
-print("\n🎉 Success! Data uploaded safely despite network instability.")
+# ==========================================
+# 6. Final Validation (فحص العدد الحقيقي في السحابة)
+# ==========================================
+count = qdrant_client.count(collection_name=settings.COLLECTION_NAME)
+print("\n======================================")
+print(f"🎉 Success! Final Count in DB: {count.count} cases.")
+print("======================================\n")
