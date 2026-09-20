@@ -8,19 +8,37 @@ logger = logging.getLogger(__name__)
 
 class VectorStoreManager:
     def __init__(self):
-        # بناء الرابط السحابي الصحيح لـ Qdrant
-        qdrant_url = settings.QDRANT_HOST if settings.QDRANT_HOST.startswith("http") else f"https://{settings.QDRANT_HOST}"
+        # 1. تنظيف اسم المضيف من أي مسافات مخفية قد تدمر الشروط
+        host = settings.QDRANT_HOST.strip()
+
+        # 2. تحديد البروتوكول بذكاء ومرونة أعلى
+        if host.startswith("http://") or host.startswith("https://"):
+            qdrant_url = host
+        elif host in ["qdrant", "localhost", "127.0.0.1", "host.docker.internal", "atheer_qdrant"]:
+            qdrant_url = f"http://{host}" # محلي
+        else:
+            qdrant_url = f"https://{host}" # سحابي
+            
+        # 3. إضافة المنفذ إذا لم يكن موجوداً
         if f":{settings.QDRANT_PORT}" not in qdrant_url:
             qdrant_url = f"{qdrant_url}:{settings.QDRANT_PORT}"
+            
+        # 4. استنتاج حالة التشفير برمجياً وبشكل قاطع (هذا هو الحل الجذري)
+        is_secure = qdrant_url.startswith("https://")
+            
+        # إعداد مفتاح API
+        api_key = settings.QDRANT_API_KEY if settings.QDRANT_API_KEY else None
         
+        # 5. بناء الاتصال وتمرير حالة التشفير كأمر صارم للمكتبة
         self.client = AsyncQdrantClient(
             url=qdrant_url,
-            api_key=settings.QDRANT_API_KEY,
+            api_key=api_key,
+            https=is_secure,  # 🔴 الآن أصبح النظام ديناميكياً 100% بناءً على البيئة
             timeout=60.0
         )
         self.collection_name = settings.COLLECTION_NAME
-        self.vector_dim = settings.VECTOR_DIM  # سيسحب القيمة 384 من ملف الإعدادات
-
+        self.vector_dim = settings.VECTOR_DIM
+        
     async def ensure_collection_exists(self):
         """
         يتحقق من وجود المجموعة، ويقوم بإنشائها إذا لم تكن موجودة.
@@ -39,7 +57,7 @@ class VectorStoreManager:
                 # نظام الحماية (Guardrail): استرداد إعدادات المجموعة الحالية
                 collection_info = await self.client.get_collection(self.collection_name)
                 
-                # التحقق من الأبعاد الفعلية في السحابة
+                # التحقق من الأبعاد الفعلية في السحابة/المحلي
                 actual_dim = collection_info.config.params.vectors.size
                 
                 if actual_dim != self.vector_dim:

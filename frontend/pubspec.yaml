@@ -38,6 +38,8 @@ dependencies:
   provider: ^6.1.5+1
   flutter_markdown: ^0.7.7+1
   file_selector: ^1.1.0
+  flutter_localizations:
+    sdk: flutter
   #ile_picker: ^12.0.0
 
 dev_dependencies:

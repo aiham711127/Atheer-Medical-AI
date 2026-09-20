@@ -63,7 +63,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization"], # 🔴 هذا هو السطر الحرج الذي يحل المشكلة
 )
 
 # ------------------------------------------

@@ -14,15 +14,16 @@ class MLOpsTracker:
         self.is_active = bool(self.tracking_uri)
         self._cached_params = None  # ذاكرة التخزين المؤقت للمعاملات (Cache)
         
-# ابحث عن دالة __init__ واستبدل جزء التهيئة بهذا:
         if self.is_active:
             try:
                 # إعداد التوكن برمجياً لمنع فتح المتصفح في الحاوية
                 os.environ["DAGSHUB_USER_TOKEN"] = os.getenv("MLFLOW_TRACKING_PASSWORD", "")
                 
-                dagshub.init(repo_owner=os.getenv("MLFLOW_TRACKING_USERNAME"), 
-                             repo_name="atheer_platform", 
-                             mlflow=True)
+                dagshub.init(
+                    repo_owner=os.getenv("MLFLOW_TRACKING_USERNAME"), 
+                    repo_name="Atheer-Medical-AI",  # تم تصحيح اسم المستودع ليطابق مشروعك الحقيقي
+                    mlflow=True
+                )
                 mlflow.set_tracking_uri(self.tracking_uri)
                 logger.info("[MLOps] Successfully connected to DagsHub & MLflow.")
             except Exception as e:
@@ -77,6 +78,29 @@ class MLOpsTracker:
         """إنهاء التجربة"""
         if self.is_active:
             mlflow.end_run()
+
+    def log_llm_metrics(self, prompt_version: str, ttfb: float, retrieval_score: float, status: str, session_id: str = "default"):
+        """
+        تسجيل مقاييس LLM الصارمة لضمان معايير الـ SLA 
+        ومنظومة منع الهلوسة الطبية.
+        """
+        try:
+            # استخدام nested=True لضمان عدم تعارض الجلسات
+            with mlflow.start_run(nested=True, run_name=f"LLM_Query_{session_id}"):
+                # تسجيل العلامات الوصفية (Tags)
+                mlflow.set_tag("prompt_version", prompt_version)
+                mlflow.set_tag("response_status", status)
+                
+                # تسجيل المقاييس الرقمية (Metrics)
+                mlflow.log_metric("ttfb_seconds", ttfb)
+                mlflow.log_metric("max_retrieval_score", retrieval_score)
+                
+                # تنبيه إذا تم تجاوز الـ SLA (أكثر من 2 ثانية)
+                if ttfb > 2.0:
+                    mlflow.set_tag("SLA_BREACH", "True")
+                
+        except Exception as e:
+            print(f"[MLOps Error] Failed to log LLM metrics: {e}")
 
 # إنشاء كائن جاهز للاستخدام في أي مكان في التطبيق (Singleton)
 mlops_tracker = MLOpsTracker()

@@ -1,6 +1,6 @@
 import logging
 import json
-# [التحديث]: استخدام المكتبة الجديدة
+import time # 🔴 [تعديل]: ضروري لحساب سرعة الاستجابة (TTFB)
 from google import genai
 from google.genai import types
 from qdrant_client import AsyncQdrantClient
@@ -9,6 +9,11 @@ from app.core.config import settings
 from app.services.rag.embeddings import EmbeddingService
 from app.core.mlops_tracker import mlops_tracker
 
+# تثبيت إصدار الـ Prompt (يجب تغييره عند أي تعديل على النص)
+CURRENT_PROMPT_VERSION = "v1.0-strict-medical"
+
+# العتبة الصارمة لمنع الهلوسة 
+MIN_RETRIEVAL_SCORE = 0.65
 logger = logging.getLogger("uvicorn.error")
 
 # إعداد قاعدة البيانات
@@ -18,12 +23,11 @@ if f":{settings.QDRANT_PORT}" not in qdrant_url:
 
 qdrant_client = AsyncQdrantClient(url=qdrant_url, api_key=settings.QDRANT_API_KEY, timeout=60.0)
 
-# [التحديث]: تهيئة عميل جوجل الجديد
+# تهيئة عميل جوجل
 gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 async def retrieve_context(user_message: str):
     try:
-        # القراءة الآن لحظية من الذاكرة (Cached)
         params = mlops_tracker.load_params()
         score_threshold = params.get("retrieval", {}).get("score_threshold", 0.6)
         top_k = params.get("retrieval", {}).get("top_k", 5)
@@ -41,24 +45,41 @@ async def retrieve_context(user_message: str):
         
         points = response.points or []
         if not points:
-            return ""
+            return "", 0.0 # 🔴 [تعديل]: إرجاع النص فارغاً مع سكور 0
+            
+        # 🔴 [تعديل]: استخراج أعلى نسبة تطابق (Score) لتقييمها في صمام الأمان
+        max_score = max([hit.score for hit in points]) if points else 0.0
 
         context_parts = [f"[S{i}]\nالمصدر: {hit.payload.get('source', '')}\nالنص: {hit.payload.get('text', '')}\n" 
                          for i, hit in enumerate(points, start=1) if hit.payload.get("text")]
-        return "\n---\n".join(context_parts)
+                         
+        return "\n---\n".join(context_parts), max_score # 🔴 [تعديل]: إرجاع النص مع السكور
+        
     except Exception as e:
         logger.error(f"[Vector DB Error]: {str(e)}", exc_info=True)
-        return ""
+        return "", 0.0
 
     
 async def generate_rag_response_stream(user_message: str, chat_history: list = None, user_role: str = "student"):
+    start_time = time.time() # 🔴 [تعديل]: بدء المؤقت الزمني لـ TTFB
+    max_score = 0.0
+    
     try:
         status_payload = json.dumps({"type": "status", "text": "جاري تحليل الأبحاث الطبية..."}, ensure_ascii=False)
         yield f"event: status\ndata: {status_payload}\n\n"
 
-        context_text = await retrieve_context(user_message)
+        # 🔴 [تعديل]: استلام النص مع نسبة التطابق
+        context_text, max_score = await retrieve_context(user_message)
         
-        if not context_text:
+        # 🔴 [تعديل]: صمام الأمان - منع الهلوسة وتسجيل الرفض في DagsHub
+        if not context_text or max_score < MIN_RETRIEVAL_SCORE:
+            ttfb = time.time() - start_time
+            mlops_tracker.log_llm_metrics(
+                prompt_version=CURRENT_PROMPT_VERSION,
+                ttfb=ttfb,
+                retrieval_score=max_score,
+                status="MED_ERR_INSUFFICIENT_DATA"
+            )
             payload = json.dumps({"type": "refusal", "text": "عذراً، الأبحاث الطبية المتاحة لدي لا تحتوي على معلومات موثوقة حول هذا الموضوع."}, ensure_ascii=False)
             yield f"event: message\ndata: {payload}\n\n"
             return
@@ -80,7 +101,6 @@ async def generate_rag_response_stream(user_message: str, chat_history: list = N
 1. الإجابة بالعربية العلمية حصراً، والمصطلحات بالإنجليزية بين قوسين.
 2. ادعم الجمل بـ [S1]. يمنع التخمين الخارجي.
 """
-        # [التحديث]: تجهيز الذاكرة والمحادثة للمكتبة الجديدة
         formatted_history = []
         for msg in (chat_history[-window_size:] if chat_history else []):
             role = "model" if msg.get("role") == "assistant" else "user"
@@ -91,16 +111,38 @@ async def generate_rag_response_stream(user_message: str, chat_history: list = N
             temperature=params.get("llm", {}).get("temperature", 0.0)
         )
 
-        # [التحديث]: بدء الدردشة وإرسال الرسالة باستخدام المكتبة الجديدة
         chat = gemini_client.chats.create(model=model_name, config=config, history=formatted_history)
         response_stream = chat.send_message_stream(user_message)
         
+        # 🔴 [تعديل]: حساب الـ TTFB (وقت وصول أول كلمة من جوجل)
+        first_token_received = False
+        ttfb = 0.0
+        
         for chunk in response_stream:
+            if not first_token_received:
+                ttfb = time.time() - start_time
+                first_token_received = True
+                
             if chunk.text:
                 payload = json.dumps({"type": "message", "text": chunk.text}, ensure_ascii=False)
                 yield f"event: message\ndata: {payload}\n\n"
 
+        # 🔴 [تعديل]: تسجيل النجاح التام في DagsHub مع السرعة والسكور
+        mlops_tracker.log_llm_metrics(
+            prompt_version=CURRENT_PROMPT_VERSION,
+            ttfb=ttfb,
+            retrieval_score=max_score,
+            status="SUCCESS"
+        )
+
     except Exception as e:
+        # 🔴 [تعديل]: تسجيل فشل السيرفر/جوجل في DagsHub
+        mlops_tracker.log_llm_metrics(
+            prompt_version=CURRENT_PROMPT_VERSION,
+            ttfb=time.time() - start_time,
+            retrieval_score=max_score,
+            status="MED_ERR_UPSTREAM_FAILED"
+        )
         logger.error(f"[Generation Error]: {str(e)}", exc_info=True)
         err_payload = json.dumps({"type": "error", "status_code": 500, "message": "حدث خطأ في الخوادم، يرجى المحاولة لاحقاً."}, ensure_ascii=False)
         yield f"event: error\ndata: {err_payload}\n\n"

@@ -82,7 +82,10 @@ RUN pip install --upgrade pip && \
 RUN pip install --no-cache-dir email-validator==2.3.0 python-multipart
 
 # 3. الأمان ونقل الملفات
-RUN useradd -m -s /bin/bash atheeruser && chown -R atheeruser:atheeruser /app
+# 3. الأمان ونقل الملفات
+RUN useradd -m -s /bin/bash atheeruser && \
+    mkdir -p /home/atheeruser/.cache/huggingface && \
+    chown -R atheeruser:atheeruser /app /home/atheeruser
 USER atheeruser
 
 COPY --chown=atheeruser:atheeruser . .

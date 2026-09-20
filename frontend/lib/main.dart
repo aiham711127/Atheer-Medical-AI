@@ -1,6 +1,8 @@
-// lib/main.dart
+// المسار: lib/main.dart
+
 import 'package:flutter/material.dart';
-import 'views/chat_screen.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'views/login_screen.dart';
 
 void main() {
   runApp(const AtheerApp());
@@ -14,17 +16,31 @@ class AtheerApp extends StatelessWidget {
     return MaterialApp(
       title: 'أثير الطبي',
       debugShowCheckedModeBanner: false,
+      // ضبط الاتجاه ليكون من اليمين لليسار (عربي)
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ar', 'AE'), // دعم اللغة العربية
+      ],
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-        useMaterial3: true,
+        primarySwatch: Colors.teal,
+        primaryColor: Colors.teal.shade700,
+        fontFamily: 'Tajawal', // يُفضل إضافة خط عربي جميل في pubspec.yaml
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.teal.shade700,
+            foregroundColor: Colors.white,
+          ),
+        ),
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.teal.shade700,
+          foregroundColor: Colors.white,
+        ),
       ),
-      builder: (context, child) {
-        return Directionality(
-          textDirection: TextDirection.rtl,
-          child: child!,
-        );
-      },
-      home: const ChatScreen(),
+      home: const LoginScreen(), 
     );
   }
 }

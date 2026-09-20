@@ -4,19 +4,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
 
-# 1. إعداد الـ SSL للاتصال بالسحابة (Neon)
-ssl_context = ssl.create_default_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
+# 1. إعداد الـ SSL بناءً على البيئة (محلي أو سحابي)
+connect_args = {}
 
-# 2. إنشاء المحرك مع إضافة connect_args
+# نتحقق إذا كان الرابط السحابي لا يحتوي على أسماء مضيفين محليين، حينها فقط نفعل التشفير
+if not any(local_host in settings.async_database_url for local_host in ["@localhost", "@127.0.0.1", "@db"]):
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    connect_args["ssl"] = ssl_context
+
+# 2. إنشاء المحرك وتمرير connect_args ديناميكياً
 engine = create_async_engine(
     settings.async_database_url,
     echo=settings.DEBUG,
     pool_size=20,
     max_overflow=10,
     pool_pre_ping=True,
-    connect_args={"ssl": ssl_context}  # <--- هذا هو السطر السحري الذي سيحل المشكلة
+    connect_args=connect_args  # <--- الآن يتم التمرير بذكاء حسب البيئة
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -28,7 +33,7 @@ AsyncSessionLocal = async_sessionmaker(
 class Base(DeclarativeBase):
     pass
 
-async def get_db(): # أزلنا -> AsyncSession مؤقتاً لتجنب أي مشاكل في الـ Typing إن وجدت
+async def get_db(): 
     async with AsyncSessionLocal() as session:
         try:
             yield session
