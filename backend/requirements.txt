@@ -24,3 +24,6 @@ redis==5.0.1
 SQLAlchemy==2.0.28
 uvicorn==0.27.0
 websockets>=13.0,<15.0
+email-validator==2.3.0
+python-multipart
+langchain-text-splitters

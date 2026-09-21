@@ -1,12 +1,12 @@
 import logging
 import json
-import time # 🔴 [تعديل]: ضروري لحساب سرعة الاستجابة (TTFB)
+import time # ضروري لحساب سرعة الاستجابة (TTFB)
 from google import genai
 from google.genai import types
-from qdrant_client import AsyncQdrantClient
 
 from app.core.config import settings
 from app.services.rag.embeddings import EmbeddingService
+from app.services.rag.vector_store import VectorStoreManager # 🔴 [التعديل المعماري]: استيراد مدير الاتصال الموحد
 from app.core.mlops_tracker import mlops_tracker
 
 # تثبيت إصدار الـ Prompt (يجب تغييره عند أي تعديل على النص)
@@ -16,15 +16,11 @@ CURRENT_PROMPT_VERSION = "v1.0-strict-medical"
 MIN_RETRIEVAL_SCORE = 0.65
 logger = logging.getLogger("uvicorn.error")
 
-# إعداد قاعدة البيانات
-qdrant_url = settings.QDRANT_HOST if settings.QDRANT_HOST.startswith("http") else f"https://{settings.QDRANT_HOST}"
-if f":{settings.QDRANT_PORT}" not in qdrant_url:
-    qdrant_url = f"{qdrant_url}:{settings.QDRANT_PORT}"
-
-qdrant_client = AsyncQdrantClient(url=qdrant_url, api_key=settings.QDRANT_API_KEY, timeout=60.0)
-
 # تهيئة عميل جوجل
 gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+# 🔴 [التعديل هنا]: تهيئة الاتصال مرة واحدة فقط على مستوى السيرفر لجميع المستخدمين
+vector_store = VectorStoreManager()
+embedding_service = EmbeddingService()
 
 async def retrieve_context(user_message: str):
     try:
@@ -32,11 +28,11 @@ async def retrieve_context(user_message: str):
         score_threshold = params.get("retrieval", {}).get("score_threshold", 0.6)
         top_k = params.get("retrieval", {}).get("top_k", 5)
 
-        embedding_service = EmbeddingService()
+        # استخدام الخدمات المُهيأة مسبقاً (سريع جداً ولن يستهلك الذاكرة)
         vector_dict = await embedding_service.encode(user_message)
         
-        response = await qdrant_client.query_points(
-            collection_name=settings.COLLECTION_NAME,
+        response = await vector_store.client.query_points(
+            collection_name=vector_store.collection_name,
             query=vector_dict["dense"],
             limit=top_k,
             score_threshold=score_threshold,
@@ -45,33 +41,31 @@ async def retrieve_context(user_message: str):
         
         points = response.points or []
         if not points:
-            return "", 0.0 # 🔴 [تعديل]: إرجاع النص فارغاً مع سكور 0
+            return "", 0.0
             
-        # 🔴 [تعديل]: استخراج أعلى نسبة تطابق (Score) لتقييمها في صمام الأمان
         max_score = max([hit.score for hit in points]) if points else 0.0
 
         context_parts = [f"[S{i}]\nالمصدر: {hit.payload.get('source', '')}\nالنص: {hit.payload.get('text', '')}\n" 
                          for i, hit in enumerate(points, start=1) if hit.payload.get("text")]
                          
-        return "\n---\n".join(context_parts), max_score # 🔴 [تعديل]: إرجاع النص مع السكور
+        return "\n---\n".join(context_parts), max_score
         
     except Exception as e:
         logger.error(f"[Vector DB Error]: {str(e)}", exc_info=True)
         return "", 0.0
-
     
 async def generate_rag_response_stream(user_message: str, chat_history: list = None, user_role: str = "student"):
-    start_time = time.time() # 🔴 [تعديل]: بدء المؤقت الزمني لـ TTFB
+    start_time = time.time()
     max_score = 0.0
     
     try:
         status_payload = json.dumps({"type": "status", "text": "جاري تحليل الأبحاث الطبية..."}, ensure_ascii=False)
         yield f"event: status\ndata: {status_payload}\n\n"
 
-        # 🔴 [تعديل]: استلام النص مع نسبة التطابق
+        # استلام النص مع نسبة التطابق
         context_text, max_score = await retrieve_context(user_message)
         
-        # 🔴 [تعديل]: صمام الأمان - منع الهلوسة وتسجيل الرفض في DagsHub
+        # صمام الأمان - منع الهلوسة وتسجيل الرفض في DagsHub
         if not context_text or max_score < MIN_RETRIEVAL_SCORE:
             ttfb = time.time() - start_time
             mlops_tracker.log_llm_metrics(
@@ -114,7 +108,7 @@ async def generate_rag_response_stream(user_message: str, chat_history: list = N
         chat = gemini_client.chats.create(model=model_name, config=config, history=formatted_history)
         response_stream = chat.send_message_stream(user_message)
         
-        # 🔴 [تعديل]: حساب الـ TTFB (وقت وصول أول كلمة من جوجل)
+        # حساب الـ TTFB
         first_token_received = False
         ttfb = 0.0
         
@@ -127,7 +121,7 @@ async def generate_rag_response_stream(user_message: str, chat_history: list = N
                 payload = json.dumps({"type": "message", "text": chunk.text}, ensure_ascii=False)
                 yield f"event: message\ndata: {payload}\n\n"
 
-        # 🔴 [تعديل]: تسجيل النجاح التام في DagsHub مع السرعة والسكور
+        # تسجيل النجاح التام
         mlops_tracker.log_llm_metrics(
             prompt_version=CURRENT_PROMPT_VERSION,
             ttfb=ttfb,
@@ -136,7 +130,6 @@ async def generate_rag_response_stream(user_message: str, chat_history: list = N
         )
 
     except Exception as e:
-        # 🔴 [تعديل]: تسجيل فشل السيرفر/جوجل في DagsHub
         mlops_tracker.log_llm_metrics(
             prompt_version=CURRENT_PROMPT_VERSION,
             ttfb=time.time() - start_time,

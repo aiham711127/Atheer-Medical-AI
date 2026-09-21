@@ -1,10 +1,12 @@
 // مسار الملف: lib/views/chat_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // ضروري لخاصية النسخ
+import 'package:flutter/services.dart';
 import '../models/chat_message.dart';
 import '../services/api_service.dart';
 import 'login_screen.dart';
+// import 'package:file_picker/file_picker.dart'; // مكتبة رفع الملفات
+import 'package:file_selector/file_selector.dart';
 
 class ChatScreen extends StatefulWidget {
   final String userToken;
@@ -26,6 +28,10 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isGenerating = false;
   String _currentStatus = "";
 
+  // متغير لحفظ الملف الذي تم اختياره
+  XFile? _selectedFile;
+  // PlatformFile? _selectedFile;
+
   @override
   void initState() {
     super.initState();
@@ -41,73 +47,129 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  // دالة اختيار الملف (PDF وغيره)
+Future<void> _pickFile() async {
+    try {
+      // تحديد الصيغ المسموحة
+      const XTypeGroup typeGroup = XTypeGroup(
+        label: 'documents',
+        extensions: <String>['pdf', 'doc', 'docx', 'txt'],
+      );
+      
+      // فتح نافذة اختيار الملفات الرسمية
+      final XFile? file = await openFile(
+        acceptedTypeGroups: <XTypeGroup>[typeGroup],
+      );
+
+      if (file != null) {
+        setState(() {
+          _selectedFile = file;
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('حدث خطأ أثناء اختيار الملف')),
+      );
+    }
+  }
+
+  // دالة إزالة الملف المختار
+  void _removeSelectedFile() {
+    setState(() {
+      _selectedFile = null;
+    });
+  }
+
   void _sendMessage() {
     final text = _messageController.text.trim();
-    if (text.isEmpty || _isGenerating) return;
+    // يجب أن يكون هناك نص أو ملف للإرسال
+    if ((text.isEmpty && _selectedFile == null) || _isGenerating) return;
 
     setState(() {
-      _messages.add(ChatMessage(text: text, isUser: true));
+      // إذا كان هناك ملف، نضيف اسمه للمحادثة ليعرف المستخدم أنه تم إرساله
+      String displayMessage = text;
+      if (_selectedFile != null) {
+        displayMessage += displayMessage.isEmpty
+            ? "📁 مرفق: ${_selectedFile!.name}"
+            : "\n\n📁 مرفق: ${_selectedFile!.name}";
+      }
+
+      _messages.add(ChatMessage(text: displayMessage, isUser: true));
       _messages.add(ChatMessage(text: "", isUser: false));
       _isGenerating = true;
-      _currentStatus = "يبحث في المراجع الطبية...";
+      _currentStatus = "جاري معالجة البيانات...";
     });
 
+    // تفريغ الحقول بعد الإرسال
     _messageController.clear();
+    // حفظ الملف في متغير مؤقت للإرسال عبر الـ API ثم تفريغ الواجهة
+    // ignore: unused_local_variable
+    final fileToSend = _selectedFile;
+    _removeSelectedFile();
     _scrollToBottom();
 
-    _streamSubscription = _apiService.sendMessageStream(text, userToken).listen(
-      (data) {
-        setState(() {
-          final eventType = data['event_type'];
+    /* 
+     ملاحظة هامة للباك إند: 
+     حالياً الدالة sendMessageStream ترسل النص فقط (JSON).
+     إذا كان الباك إند الخاص بك يدعم استقبال ملفات (Multipart Form Data)، 
+     يجب تعديل ApiService لتقوم بإرسال `fileToSend.bytes` أو مساره.
+    */
 
-          if (eventType == 'status') {
-            _currentStatus = data['text'] ?? "";
-          } else if (eventType == 'message') {
-            _currentStatus = "";
-            final currentText = _messages.last.text;
-            final newChunk = data['text'] ?? "";
-            _messages[_messages.length - 1] = ChatMessage(
-              text: currentText + newChunk,
-              isUser: false,
-            );
-          } else if (eventType == 'refusal') {
-            _currentStatus = "";
-            _messages[_messages.length - 1] = ChatMessage(
-              text: data['text'] ?? "تم رفض الطلب بدواعي السلامة الطبية.",
-              isUser: false,
-              isWarning: true,
-            );
-            _isGenerating = false;
-          } else if (eventType == 'error') {
-            _currentStatus = "";
-            _messages[_messages.length - 1] = ChatMessage(
-              text: "⚠️ ${data['message'] ?? 'حدث خطأ في الاتصال'}",
-              isUser: false,
-              isWarning: true,
-            );
-            _isGenerating = false;
-          }
-        });
-        _scrollToBottom();
-      },
-      onDone: () {
-        setState(() {
-          _isGenerating = false;
-          _currentStatus = "";
-        });
-      },
-      onError: (error) {
-        setState(() {
-          _isGenerating = false;
-          _currentStatus = "";
-          _messages[_messages.length - 1] = ChatMessage(
-            text: "⚠️ انقطع الاتصال بالخادم.",
-            isUser: false,
-            isWarning: true,
-          );
-        });
-      },
-    );
+    _streamSubscription = _apiService
+        .sendMessageStream(text, userToken)
+        .listen(
+          (data) {
+            setState(() {
+              final eventType = data['event_type'];
+
+              if (eventType == 'status') {
+                _currentStatus = data['text'] ?? "";
+              } else if (eventType == 'message') {
+                _currentStatus = "";
+                final currentText = _messages.last.text;
+                final newChunk = data['text'] ?? "";
+                _messages[_messages.length - 1] = ChatMessage(
+                  text: currentText + newChunk,
+                  isUser: false,
+                );
+              } else if (eventType == 'refusal') {
+                _currentStatus = "";
+                _messages[_messages.length - 1] = ChatMessage(
+                  text: data['text'] ?? "تم رفض الطلب بدواعي السلامة الطبية.",
+                  isUser: false,
+                  isWarning: true,
+                );
+                _isGenerating = false;
+              } else if (eventType == 'error') {
+                _currentStatus = "";
+                _messages[_messages.length - 1] = ChatMessage(
+                  text: "⚠️ ${data['message'] ?? 'حدث خطأ في الاتصال'}",
+                  isUser: false,
+                  isWarning: true,
+                );
+                _isGenerating = false;
+              }
+            });
+            _scrollToBottom();
+          },
+          onDone: () {
+            setState(() {
+              _isGenerating = false;
+              _currentStatus = "";
+            });
+          },
+          onError: (error) {
+            setState(() {
+              _isGenerating = false;
+              _currentStatus = "";
+              _messages[_messages.length - 1] = ChatMessage(
+                text: "⚠️ انقطع الاتصال بالخادم.",
+                isUser: false,
+                isWarning: true,
+              );
+            });
+          },
+        );
   }
 
   void _scrollToBottom() {
@@ -145,17 +207,22 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
-        title: const Text("المساعد الطبي أثير", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          "المساعد الطبي أثير",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         centerTitle: true,
         elevation: 0,
       ),
-      // القائمة الجانبية (Drawer)
       drawer: Drawer(
         child: Column(
           children: [
             UserAccountsDrawerHeader(
               decoration: BoxDecoration(color: Theme.of(context).primaryColor),
-              accountName: const Text("د. أيهم", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              accountName: const Text(
+                "م. أيهم البخيتي",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
               accountEmail: const Text("aiham123@gmail.com"),
               currentAccountPicture: const CircleAvatar(
                 backgroundColor: Colors.white,
@@ -165,22 +232,15 @@ class _ChatScreenState extends State<ChatScreen> {
             ListTile(
               leading: const Icon(Icons.history),
               title: const Text('سجل المحادثات'),
-              onTap: () {}, // إضافة المنطق لاحقاً
-            ),
-            ListTile(
-              leading: const Icon(Icons.person_outline),
-              title: const Text('الملف الشخصي'),
-              onTap: () {},
-            ),
-            ListTile(
-              leading: const Icon(Icons.shield_outlined),
-              title: const Text('الخصوصية والأمان'),
               onTap: () {},
             ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('تسجيل الخروج', style: TextStyle(color: Colors.red)),
+              title: const Text(
+                'تسجيل الخروج',
+                style: TextStyle(color: Colors.red),
+              ),
               onTap: _logout,
             ),
           ],
@@ -199,7 +259,8 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-          if (_isGenerating && _currentStatus.isNotEmpty) _buildTypingIndicator(),
+          if (_isGenerating && _currentStatus.isNotEmpty)
+            _buildTypingIndicator(),
           _buildInputArea(),
         ],
       ),
@@ -211,7 +272,9 @@ class _ChatScreenState extends State<ChatScreen> {
       alignment: msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: 16.0),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.85,
+        ),
         decoration: BoxDecoration(
           color: msg.isWarning
               ? Colors.red.shade50
@@ -236,7 +299,6 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // استخدام SelectableText للسماح بتحديد النص
               SelectableText(
                 msg.text,
                 style: TextStyle(
@@ -247,7 +309,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       : (msg.isUser ? Colors.white : Colors.black87),
                 ),
               ),
-              // زر النسخ يظهر فقط لردود الذكاء الاصطناعي
               if (!msg.isUser && msg.text.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 8.0),
@@ -259,9 +320,19 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.copy, size: 16, color: Colors.grey.shade600),
+                            Icon(
+                              Icons.copy,
+                              size: 16,
+                              color: Colors.grey.shade600,
+                            ),
                             const SizedBox(width: 4),
-                            Text("نسخ", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                            Text(
+                              "نسخ",
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -288,7 +359,10 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(width: 12),
           Text(
             _currentStatus,
-            style: TextStyle(color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ],
       ),
@@ -309,35 +383,100 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
       child: SafeArea(
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: TextField(
-                controller: _messageController,
-                maxLines: 4,
-                minLines: 1,
-                decoration: InputDecoration(
-                  hintText: "اسأل أثير...",
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            // عرض الملف المختار فوق حقل النص
+            if (_selectedFile != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.teal.shade200),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.picture_as_pdf,
+                      color: Colors.redAccent,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        _selectedFile!.name,
+                        style: TextStyle(
+                          color: Colors.teal.shade900,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: _removeSelectedFile,
+                      child: const Icon(
+                        Icons.close,
+                        size: 20,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: _isGenerating ? Colors.grey : Theme.of(context).primaryColor,
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_upward, color: Colors.white),
-                onPressed: _isGenerating ? null : _sendMessage,
-              ),
+
+            // حقل النص وأزرار الإرسال والرفع
+            Row(
+              children: [
+                // زر رفع الملفات مع تلميح (Tooltip)
+                Tooltip(
+                  message: "رفع ملف",
+                  child: IconButton(
+                    icon: Icon(Icons.attach_file, color: Colors.grey.shade700),
+                    onPressed: _isGenerating ? null : _pickFile,
+                  ),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    maxLines: 4,
+                    minLines: 1,
+                    decoration: InputDecoration(
+                      hintText: "اسأل أثير أو ارفع ملفاً...",
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: _isGenerating
+                        ? Colors.grey
+                        : Theme.of(context).primaryColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_upward, color: Colors.white),
+                    onPressed: _isGenerating ? null : _sendMessage,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -345,3 +484,5 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 }
+
+
