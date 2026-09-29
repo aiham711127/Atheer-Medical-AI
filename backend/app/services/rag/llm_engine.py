@@ -13,7 +13,9 @@ from app.core.mlops_tracker import mlops_tracker
 CURRENT_PROMPT_VERSION = "v1.0-strict-medical"
 
 # العتبة الصارمة لمنع الهلوسة 
-MIN_RETRIEVAL_SCORE = 0.65
+# MIN_RETRIEVAL_SCORE = 0.65
+MIN_RETRIEVAL_SCORE = 0.30
+
 logger = logging.getLogger("uvicorn.error")
 
 # تهيئة عميل جوجل
